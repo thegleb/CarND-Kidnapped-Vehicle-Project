@@ -1,15 +1,11 @@
-# Overview
-This repository contains all the code needed to complete the final project for the Localization course in Udacity's Self-Driving Car Nanodegree.
+# Udacity SDC Engineer: Kidnapped Vehicle Project
 
-#### Submission
-All you will need to submit is your `src` directory. You should probably do a `git pull` before submitting to verify that your project passes the most up-to-date version of the grading code (there are some parameters in `src/main.cpp` which govern the requirements on accuracy and run time).
+## Project Introduction (shamelessly modified from the project readme)
+ Your robot has been kidnapped and transported to a new location! Luckily it has a map of this location, a (noisy) GPS estimate of its initial location, and lots of (noisy) sensor and control data.
 
-## Project Introduction
-Your robot has been kidnapped and transported to a new location! Luckily it has a map of this location, a (noisy) GPS estimate of its initial location, and lots of (noisy) sensor and control data.
+This project implement a 2 dimensional particle filter in C++. The particle filter is given a map and some initial localization information (analogous to what a GPS would provide). At each time step the filter also receives observation and control data.
 
-In this project you will implement a 2 dimensional particle filter in C++. Your particle filter will be given a map and some initial localization information (analogous to what a GPS would provide). At each time step your filter will also get observation and control data.
-
-## Running the Code
+## Running the Code (also shamelessly preserved from the project readme)
 This project involves the Term 2 Simulator which can be downloaded [here](https://github.com/udacity/self-driving-car-sim/releases)
 
 This repository includes two files that can be used to set up and install uWebSocketIO for either Linux or Mac systems. For windows you can use either Docker, VMware, or even Windows 10 Bash on Ubuntu to install uWebSocketIO.
@@ -27,14 +23,6 @@ Alternatively some scripts have been included to streamline this process, these 
 1. ./clean.sh
 2. ./build.sh
 3. ./run.sh
-
-Tips for setting up your environment can be found [here](https://classroom.udacity.com/nanodegrees/nd013/parts/40f38239-66b6-46ec-ae68-03afd8a601c8/modules/0949fca6-b379-42af-a919-ee50aa304e6a/lessons/f758c44c-5e40-4e01-93b5-1a82aa4e044f/concepts/23d376c7-0195-4276-bdf0-e02f1f3c665d)
-
-Note that the programs that need to be written to accomplish the project are src/particle_filter.cpp, and particle_filter.h
-
-The program main.cpp has already been filled out, but feel free to modify it.
-
-Here is the main protocol that main.cpp uses for uWebSocketIO in communicating with the simulator.
 
 INPUT: values provided by the simulator to the c++ program
 
@@ -82,62 +70,113 @@ OUTPUT: values provided by the c++ program to the simulator
 ["best_particle_sense_y"] <= list of sensed y positions
 
 
-Your job is to build out the methods in `particle_filter.cpp` until the simulator output says:
+## Implementing the Particle Filter
+
+`src/main.cpp` contains the logic for communicating with the simulator code. It also defines the proper sequence of particle filter steps: initialize (if first step), predict, sense, update weights, resample, and finally output average and best weights.
+
+The actual logic for each of the steps mentioned above (other than check accuracy) is implemented inside  `src/particle_filter.cpp` and described at a high level below.
+
+### Initialization
+
+Our `ParticleFilter` is provided an initial reading of a potential location. We start by initializing 50 particles (number arbitrarily chosen because it provides good accuracy while making the code run reasonably quickly).
 
 ```
-Success! Your particle filter passed!
+for (int i = 0; i < num_particles; i++) {
+  particle.x = x + x_dist(x_generator);
+  particle.y = y + y_dist(y_generator);
+  particle.theta = theta + theta_dist(theta_generator);
+}
 ```
 
-# Implementing the Particle Filter
-The directory structure of this repository is as follows:
+We add random noise to the x/y/theta readings to provide a variety of perspectives - after all, the particle filter logic will decide which particle is most likely to represent the correct position of the robot.
+
+### Prediction
+
+If the particle filter has already been initialized, then we use current `velocity`, `yaw_rate` (how fast the direction is changing), as well as the time step (`delta_t`) to predict a new position and direction for each particle. To each of the predictions we also add a bit of random Gaussian noise.
 
 ```
-root
-|   build.sh
-|   clean.sh
-|   CMakeLists.txt
-|   README.md
-|   run.sh
-|
-|___data
-|   |   
-|   |   map_data.txt
-|   
-|   
-|___src
-    |   helper_functions.h
-    |   main.cpp
-    |   map.h
-    |   particle_filter.cpp
-    |   particle_filter.h
+particles[i].x += velocity / yaw_rate * (sin(particles[i].theta + yaw_rate * delta_t) - sin(particles[i].theta)) + x_dist(x_generator);
+particles[i].y += velocity / yaw_rate * (cos(particles[i].theta) - cos(particles[i].theta + yaw_rate * delta_t)) + y_dist(y_generator);
+particles[i].theta += yaw_rate * delta_t + theta_dist(theta_generator);
 ```
 
-The only file you should modify is `particle_filter.cpp` in the `src` directory. The file contains the scaffolding of a `ParticleFilter` class and some associated methods. Read through the code, the comments, and the header file `particle_filter.h` to get a sense for what this code is expected to do.
+When yaw rate is close to 0, the formulas above become problematic as we might be dividing by zero when `yaw_rate` is 0; for sufficiently small `yaw_rate`s we do a simple linear prediction for the new position:
 
-If you are interested, take a look at `src/main.cpp` as well. This file contains the code that will actually be running your particle filter and calling the associated methods.
+```
+particles[i].x += velocity * delta_t * sin(particles[i].theta) + x_dist(x_generator);
+particles[i].y += velocity * delta_t * cos(particles[i].theta) + y_dist(y_generator);
+```
 
-## Inputs to the Particle Filter
-You can find the inputs to the particle filter in the `data` directory.
+### Sensing
 
-#### The Map*
-`map_data.txt` includes the position of landmarks (in meters) on an arbitrary Cartesian coordinate system. Each row has three columns
-1. x position
-2. y position
-3. landmark id
+After the new prediction is calculated, we first have to transform each of the observations at that location from the robot coordinate system into map space with a little trigonometry, where `x_pos` and `y_pos` represents the x/y coordinates of each particle and `x_obs` / `y_obs` represent the x/y offsets of each observation from the robot's perspective.
 
-### All other data the simulator provides, such as observations and controls.
+```
+transformed.x = x_pos + cos(heading) * x_obs - sin(heading) * y_obs;
+transformed.y = y_pos + sin(heading) * x_obs + cos(heading) * y_obs;
+```
 
-> * Map data provided by 3D Mapping Solutions GmbH.
+The next step is to filter out any landmark that is too far from the current particle location to make associating observations with the landmarks more accurate.
 
-## Success Criteria
-If your particle filter passes the current grading code in the simulator (you can make sure you have the current version at any time by doing a `git pull`), then you should pass!
+```
+if (dist(particles[i].x, particles[i].y, landmarks[j].x_f, landmarks[j].y_f) <= sensor_range) {
+  landmarks_in_range.push_back(landmarks[j]);
+}
+```
 
-The things the grading code is looking for are:
+Now we can associate each observation with the corresponding landmarks by doing a  simple nearest neighbors search. In condensed form, it looks like this:
 
+```
+double minDistance = INFINITY;
+for (int j = 0; j < landmarks.size(); ++j) {
+  double currDistance = dist(landmarks[j].x_f, landmarks[j].y_f, observations[i].x, observations[i].y);
 
-1. **Accuracy**: your particle filter should localize vehicle position and yaw to within the values specified in the parameters `max_translation_error` and `max_yaw_error` in `src/main.cpp`.
+  if (currDistance < minDistance) {
+    nearest = landmarks[j];
+    minDistance = currDistance;
+  }
+}
 
-2. **Performance**: your particle filter should complete execution within the time of 100 seconds.
+observations[i].id = nearest.id_i;
+```
 
-## How to write a README
-A well written README file can enhance your project and portfolio.  Develop your abilities to create professional README files by completing [this free course](https://www.udacity.com/course/writing-readmes--ud777).
+For each observation, we iterate over each landmark and pick the nearest one to associate with.
+
+### Update weights
+
+Now we can calculate the probability of each particle's location by using the multi-variate Gaussian distribution, comparing the distances between the observed landmarks and the ground truth of the landmark locations. The new particle weight becomes the product of each individual landmark observation probability.
+
+```
+for (int j = 0; j < transformed_observations.size(); j++) {
+  Map::single_landmark_s nearest_landmark = landmarks[transformed_observations[j].id - 1];
+  double gaussian = multi_variate_gaussian(transformed_observations[j].x, transformed_observations[j].y, nearest_landmark.x_f, nearest_landmark.y_f, std_landmark[0], std_landmark[1]);
+  
+  prob *= gaussian;
+}
+
+particles[i].weight = prob;
+```
+
+Afterwards, we normalize the particle weights by dividing each weight by the sum of all weights (no exciting code sample to show since it is straightforward division).
+
+### Resample
+
+Now we resample the particles to make sure particles with the highest weight / probability get preserved for the next round. We use C++'s random distribution generator  `std::discrete_distribution` provided as part of the `random` library to accomplish this. `discrete_distribution` generates indices of the highest-quality particles using the weight of each particle to determine its probability of being selected. 
+
+```
+for (int i = 0; i < particles.size(); ++i) {
+  probabilities.push_back(particles[i].weight);
+}
+
+std::default_random_engine generator;
+std::discrete_distribution<int> distribution (probabilities.begin(), probabilities.end());
+
+for (int i = 0; i < particles.size(); ++i) {
+  int selected_idx = distribution(generator);
+  new_particles.push_back(particles[selected_idx]);
+}
+```
+
+### And that's it
+
+... at least for relevant code that was user-generated for this project ;)

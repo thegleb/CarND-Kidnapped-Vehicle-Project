@@ -151,16 +151,8 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
   
   double sum_weights = 0;
   for (int i = 0; i < particles.size(); i++) {
-    vector<Map::single_landmark_s> landmarks_in_range;
 
-    // 1. find all the landmarks in range of the particle to avoid false matches
-    for (int j = 0; j < landmarks.size(); j++) {
-      if (dist(particles[i].x, particles[i].y, landmarks[j].x_f, landmarks[j].y_f) <= sensor_range) {
-        landmarks_in_range.push_back(landmarks[j]);
-      }
-    }
-
-    // 2. transform current observations to map coordinates
+    // 1. transform current observations to map coordinates
     vector<LandmarkObs> transformed_observations;
     for (int j = 0; j < observations.size(); j++) {
       LandmarkObs transformed = transform_to_map_coord(particles[i].x, particles[i].y, particles[i].theta,
@@ -169,6 +161,14 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
       transformed.id = observations[j].id;
 
       transformed_observations.push_back(transformed);
+    }
+
+    // 2. find all the landmarks in range of the particle to avoid false matches
+    vector<Map::single_landmark_s> landmarks_in_range;
+    for (int j = 0; j < landmarks.size(); j++) {
+      if (dist(particles[i].x, particles[i].y, landmarks[j].x_f, landmarks[j].y_f) <= sensor_range) {
+        landmarks_in_range.push_back(landmarks[j]);
+      }
     }
 
     // 3. associate transformed observations with predicted landmarks
@@ -183,8 +183,7 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
       // (probably not needed after the rest of the code started working but keeping it just in case)
       if (landmark_id >= 0 and landmark_id <= landmarks.size()) {
         Map::single_landmark_s nearest_landmark = landmarks[transformed_observations[j].id - 1];
-        double gaussian = multi_variate_gaussian(
-                                                 transformed_observations[j].x,
+        double gaussian = multi_variate_gaussian(transformed_observations[j].x,
                                                  transformed_observations[j].y,
                                                  nearest_landmark.x_f, nearest_landmark.y_f,
                                                  std_landmark[0], std_landmark[1]);
