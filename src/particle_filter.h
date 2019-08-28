@@ -13,6 +13,8 @@
 #include <vector>
 #include "helper_functions.h"
 
+#define MIN_YAW_RATE 0.00000000001
+
 struct Particle {
   int id;
   double x;
@@ -63,8 +65,9 @@ class ParticleFilter {
    * @param predicted Vector of predicted landmark observations
    * @param observations Vector of landmark observations
    */
-  void dataAssociation(std::vector<LandmarkObs> predicted, 
-                       std::vector<LandmarkObs>& observations);
+  void dataAssociation(std::vector<Map::single_landmark_s> predicted, 
+                       std::vector<LandmarkObs>& observations,
+                       Particle &particle);
   
   /**
    * updateWeights Updates the weights for each particle based on the likelihood
