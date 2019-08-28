@@ -13,7 +13,7 @@
 #include <vector>
 #include "helper_functions.h"
 
-#define MIN_YAW_RATE 0.00000000001
+#define MIN_YAW_RATE 0.0001
 
 struct Particle {
   int id;
